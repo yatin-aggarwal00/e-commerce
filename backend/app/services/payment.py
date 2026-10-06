@@ -59,8 +59,9 @@ class FakePaymentProvider:
     name = "fake"
 
     def create_payment_intent(self, amount_cents, currency, metadata):
+        # Non-cryptographic: just a stable fake id derived from the metadata.
         pid = "pi_fake_" + hashlib.sha1(
-            json.dumps(metadata, sort_keys=True).encode()
+            json.dumps(metadata, sort_keys=True).encode(), usedforsecurity=False
         ).hexdigest()[:20]
         return PaymentIntent(
             id=pid,

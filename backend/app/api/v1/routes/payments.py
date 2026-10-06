@@ -16,6 +16,21 @@ from app.services.payment import PaymentError, get_payment_provider
 router = APIRouter(prefix="/payments", tags=["payments"])
 
 
+@router.get("/config")
+def payment_config() -> dict:
+    """Public payment configuration for the storefront.
+
+    Exposes only the active provider and the publishable key (safe for the
+    browser). The storefront uses this to decide whether to mount the Stripe
+    Payment Element or fall back to the sandbox confirm flow.
+    """
+    provider = get_payment_provider()
+    return {
+        "provider": provider.name,
+        "publishable_key": settings.STRIPE_PUBLISHABLE_KEY,
+    }
+
+
 def _finalize_paid(db: DbSession, order: Order) -> None:
     """Commit reserved stock to a sale. Safe to call once per order."""
     for item in order.items:

@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app import __version__
 from app.api.v1.router import api_router
@@ -16,6 +18,9 @@ logger = logging.getLogger("app")
 
 
 def create_app() -> FastAPI:
+    # Refuse to boot with insecure/incomplete production configuration.
+    settings.validate_runtime()
+
     # Optional error tracking.
     if settings.SENTRY_DSN:
         try:  # pragma: no cover - only runs when configured
@@ -46,6 +51,17 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     app.add_middleware(RateLimitMiddleware)
+
+    # Serve locally-stored product images when using the "local" storage
+    # backend. In production (STORAGE_BACKEND=s3) images are served by S3/CDN.
+    if settings.STORAGE_BACKEND.lower() == "local":
+        media_root = Path(settings.MEDIA_ROOT)
+        media_root.mkdir(parents=True, exist_ok=True)
+        app.mount(
+            settings.MEDIA_URL_PREFIX,
+            StaticFiles(directory=str(media_root)),
+            name="media",
+        )
 
     app.include_router(api_router, prefix=settings.API_V1_PREFIX)
 

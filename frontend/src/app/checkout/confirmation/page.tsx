@@ -17,19 +17,45 @@ function Confirmation() {
   const [order, setOrder] = useState<Order | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
+  const [awaitingWebhook, setAwaitingWebhook] = useState(provider === "stripe");
 
-  const load = useCallback(async () => {
-    if (!orderNumber) return;
+  const load = useCallback(async (): Promise<Order | null> => {
+    if (!orderNumber) return null;
     try {
-      setOrder(await api.getOrder(orderNumber, email));
+      const o = await api.getOrder(orderNumber, email);
+      setOrder(o);
+      return o;
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Could not load order");
+      return null;
     }
   }, [orderNumber, email]);
 
   useEffect(() => {
     load();
+    // The payment step is done; clear the stashed client secret.
+    try {
+      sessionStorage.removeItem("ec_pending_payment");
+    } catch {
+      /* ignore */
+    }
   }, [load]);
+
+  // After a Stripe redirect the order is paid by the webhook, which may lag a
+  // moment. Poll briefly until it flips to paid.
+  useEffect(() => {
+    if (provider !== "stripe") return;
+    let tries = 0;
+    const timer = setInterval(async () => {
+      tries += 1;
+      const o = await load();
+      if ((o && o.payment_status === "paid") || tries >= 8) {
+        setAwaitingWebhook(false);
+        clearInterval(timer);
+      }
+    }, 2000);
+    return () => clearInterval(timer);
+  }, [provider, load]);
 
   async function completeSandboxPayment() {
     setWorking(true);
@@ -92,11 +118,21 @@ function Confirmation() {
         </div>
       )}
 
-      {!paid && provider === "stripe" && (
-        <div className="mt-6 rounded-md border border-dashed border-brand-300 bg-brand-50 p-4 text-sm text-brand-600">
-          Mount the Stripe Payment Element here with the returned <code>client_secret</code> to
-          collect card details. On success, Stripe calls the backend webhook which marks the order
-          paid.
+      {!paid && provider === "stripe" && awaitingWebhook && (
+        <div className="mt-6 flex items-center gap-3 rounded-md border border-dashed border-brand-300 bg-brand-50 p-4 text-sm text-brand-600">
+          <span className="h-4 w-4 animate-spin rounded-full border-2 border-brand-300 border-t-brand-600" />
+          Confirming your payment with the gateway…
+        </div>
+      )}
+
+      {!paid && provider === "stripe" && !awaitingWebhook && (
+        <div className="mt-6 rounded-md border border-dashed border-amber-300 bg-amber-50 p-4 text-sm text-amber-800">
+          We haven’t received payment confirmation yet. If you completed payment, this page will
+          update shortly — you can also check{" "}
+          <Link href="/account/orders" className="underline">
+            your orders
+          </Link>
+          .
         </div>
       )}
 
