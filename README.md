@@ -66,7 +66,10 @@ pluggable payment gateway.
 ├── frontend/             Next.js storefront + admin
 │   └── src/{app,components,context,lib}
 ├── docker-compose.yml    db + redis + api + web
-└── .github/workflows/    CI (lint, test, build, staging deploy hook)
+├── .lighthouserc.json    Lighthouse CI budgets for key pages
+└── .github/
+    ├── workflows/ci.yml   lint, test, security, E2E, Lighthouse, deploy
+    └── dependabot.yml      weekly dependency update PRs
 ```
 
 ## Quick start (Docker — recommended)
@@ -137,8 +140,9 @@ filter/sort/search, cart stock rules, the full checkout → webhook → paid flo
 | Catalog   | `GET /catalog/products` (filter/sort/paginate), `/catalog/products/{slug}`, `/catalog/autocomplete`, `/catalog/facets` |
 | Cart      | `GET/POST/PATCH/DELETE /cart…` (guest via `X-Cart-Token`, or authed)      |
 | Checkout  | `POST /checkout`, `GET /orders`, `GET /orders/{number}`                   |
-| Payments  | `POST /payments/webhook` (idempotent, source of truth for paid state)     |
-| Admin     | `/admin/products`, `/admin/variants/{id}/inventory`, `/admin/orders`, `/admin/stats` |
+| Auth      | `POST /auth/password-reset/request`, `/auth/password-reset/confirm`       |
+| Payments  | `GET /payments/config` (provider + publishable key), `POST /payments/webhook` (idempotent, source of truth for paid state) |
+| Admin     | `/admin/products`, `/admin/variants/{id}/inventory`, `/admin/orders`, `/admin/stats`, `POST /admin/uploads` (image upload) |
 
 Full, always-current docs are generated at `/docs`.
 
@@ -163,23 +167,29 @@ Full, always-current docs are generated at `/docs`.
 - Product detail with variants, gallery, live stock, dimensions
 - Search + autocomplete (Postgres-portable ILIKE; FTS is the upgrade path)
 - Guest & authenticated carts, persistence, merge-on-login
-- Register / login / refresh / profile / saved addresses
-- Checkout → sandbox payment → order confirmation email (console backend)
+- Register / login / refresh / profile / saved addresses / **password reset UI**
+- **Stripe Payment Element** checkout → webhook-confirmed paid → confirmation
+  email; falls back to the `fake` provider (no keys) for local/CI
 - Idempotent payment webhook; no duplicate/paid-on-failure orders
-- Admin: product CRUD, inventory, order status, dashboard stats
+- Admin: product CRUD, inventory, order status, dashboard stats, **image upload**
+  (local or S3-compatible storage behind a CDN)
 - SEO: metadata, sitemap, robots, `Product` structured data
-- OpenAPI docs; backend tests at 85% coverage
-- Dockerised; CI runs lint + tests + build
+- **Error tracking**: Sentry on both API and storefront (enabled via DSN)
+- OpenAPI docs; backend tests at ~85% coverage
+- Dockerised; CI runs lint, tests, **security scans (bandit/pip-audit/npm audit),
+  Playwright E2E, Lighthouse budgets**, and builds/pushes images for staging &
+  (tag-gated) production
 
 **Deliberate V1 choices / follow-ups**
 
-- Stripe **Payment Element** UI is stubbed with a clear integration point; the
-  PaymentIntent + webhook halves are real. Add `@stripe/react-stripe-js` and
-  wire the client secret to go fully live.
-- Image storage uses external URLs; wire S3 + CDN upload in admin for V1.1.
 - Search uses ILIKE; swap to Postgres FTS / Algolia when volume grows.
 - Rate limiting is in-process; move the counter to Redis for multi-instance.
-- Monitoring (Sentry) is wired via `SENTRY_DSN` but disabled by default.
+- Lighthouse **performance** is a CI warning (runner-dependent); SEO and
+  accessibility budgets (≥0.90) are hard gates. See `.lighthouserc.json`.
+- The `deploy-*` jobs push images to GHCR; wire the final rollout step to your
+  host (see the runbook).
+- Abandoned pending orders keep their reservation; expiring them is a scheduled
+  job (runbook follow-up).
 
 ## Deployment
 

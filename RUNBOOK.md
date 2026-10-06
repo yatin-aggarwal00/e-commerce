@@ -25,12 +25,24 @@ Required in staging/prod:
 - `SECRET_KEY` — long random string (`python -c "import secrets;print(secrets.token_urlsafe(48))"`)
 - `DATABASE_URL` — managed Postgres connection string
 - `REDIS_URL`
-- `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` — from the Stripe dashboard
+- `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET` — from the Stripe dashboard
 - `BACKEND_CORS_ORIGINS` — the exact storefront origin(s)
 - `FRONTEND_URL`, `NEXT_PUBLIC_SITE_URL`, `NEXT_PUBLIC_API_URL`, `API_URL_INTERNAL`
+- `STORAGE_BACKEND=s3` + `S3_BUCKET`, `S3_REGION`, `S3_ACCESS_KEY_ID`,
+  `S3_SECRET_ACCESS_KEY`, and `S3_PUBLIC_BASE_URL` (your CDN origin).
+  `S3_ENDPOINT_URL` is only needed for non-AWS stores (MinIO/R2/Spaces).
 - `EMAIL_BACKEND=smtp` + SMTP credentials (or swap `services/email.py` for SES/SendGrid)
-- `SENTRY_DSN` — enables error tracking
-- `ENVIRONMENT=production` — disables the dev-only payment confirm endpoint
+- `SENTRY_DSN` (API) and `NEXT_PUBLIC_SENTRY_DSN` (storefront) — enable error tracking
+- `ENVIRONMENT=production` — disables the dev-only payment confirm endpoint and
+  activates the startup config check (`Settings.validate_runtime`), which refuses
+  to boot on a weak `SECRET_KEY`, `DEBUG=true`, missing Stripe/S3 config, or empty CORS.
+
+### GitHub Actions variables (for the deploy jobs)
+
+Set these as **repository/Environment variables** (not secrets) so the web image
+builds with the right public URLs: `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_SITE_URL`.
+Images are pushed to `ghcr.io/<owner>/<repo>/{api,web}`; GHCR auth uses the
+built-in `GITHUB_TOKEN` (no extra secret needed).
 
 ## Database migrations
 
@@ -50,16 +62,32 @@ should be unset/false outside dev/staging).
 
 ## Release process
 
-1. Merge to `main`. CI runs backend lint+tests and frontend lint+typecheck+build.
-2. On green `main`, the `deploy-staging` job runs — wire it to your target
-   (build & push images, then deploy). Migrations run automatically on boot.
+1. Open a PR to `main`. CI runs on every PR: backend lint+tests (coverage gate
+   80%), frontend lint+typecheck+build, security scans, Playwright E2E and
+   Lighthouse (both against a throwaway `docker compose` stack).
+2. Merge to `main`. On green `main`, `deploy-staging` builds and pushes the API
+   and web images to GHCR (tags `staging` and the commit SHA) and runs the
+   rollout step — wire that step to your host. Migrations run automatically on
+   boot (`start.sh`).
 3. Smoke-test staging: load home, browse, add to cart, checkout with a Stripe
-   test card, confirm the webhook marks the order paid and the email sends.
-4. Promote the same images to production and run the same smoke test.
+   test card (e.g. `4242 4242 4242 4242`), confirm the webhook marks the order
+   paid and the confirmation email sends.
+4. Tag a release (`git tag vX.Y.Z && git push --tags`) — `deploy-production`
+   builds/pushes `latest` + the tag and runs the production rollout. Or trigger
+   it manually via **workflow_dispatch**.
 
-Rollback: redeploy the previous image tag. If a migration must be reverted,
-`alembic downgrade` to the prior revision **before** rolling back app code that
-depends on the new schema.
+Rollback: redeploy the previous image tag (GHCR keeps every SHA/tag). If a
+migration must be reverted, `alembic downgrade` to the prior revision **before**
+rolling back app code that depends on the new schema.
+
+### Quality gates
+
+- **Coverage:** backend fails under 80% (currently ~85%).
+- **Security:** `bandit` (our code) is a hard gate; `pip-audit` and `npm audit`
+  report third-party CVEs without blocking — triage via the Dependabot PRs.
+- **Lighthouse:** SEO and accessibility must score ≥0.90 on home, listing and
+  product pages; performance (≥0.85) is a warning because scores vary with CI
+  runner load. Budgets live in `.lighthouserc.json`.
 
 ## Payment gateway / webhooks
 
@@ -70,10 +98,21 @@ depends on the new schema.
 - Locally, test with the Stripe CLI: `stripe listen --forward-to
   localhost:8000/api/v1/payments/webhook`.
 
+## Product images / object storage
+
+- Admins upload images via `POST /api/v1/admin/uploads`; the response URL is
+  attached to a product. The backend is pluggable (`app/services/storage.py`):
+  - `STORAGE_BACKEND=local` (dev) writes under `MEDIA_ROOT` and serves at
+    `/media`. Ephemeral — not for multi-instance production.
+  - `STORAGE_BACKEND=s3` (staging/prod) uploads to any S3-compatible bucket and
+    returns `S3_PUBLIC_BASE_URL/<key>` — point that at your CDN.
+- Add your bucket/CDN host to `frontend/next.config.mjs` `images.remotePatterns`
+  so `next/image` will optimise them (`**.amazonaws.com` is already allowed).
+
 ## Monitoring & observability
 
-- **Errors:** set `SENTRY_DSN` to capture API exceptions (`app/main.py`).
-  Add the Sentry SDK to the frontend similarly for client errors.
+- **Errors:** set `SENTRY_DSN` (API, `app/main.py`) and `NEXT_PUBLIC_SENTRY_DSN`
+  (storefront, `components/SentryInit.tsx`). Both are no-ops when unset.
 - **Health checks:** `GET /api/v1/health` (liveness) and `/api/v1/health/db`
   (readiness — verifies DB connectivity). Point your platform's probes here.
 - **Logs:** structured app logs on stdout; ship to your log aggregator.
@@ -89,9 +128,9 @@ depends on the new schema.
 
 - Scheduled job to expire abandoned pending orders and release reserved stock.
 - Move rate-limit counters to Redis for correct multi-instance limiting.
-- S3/CDN image upload pipeline in the admin UI.
 - Upgrade search from ILIKE to Postgres full-text search or Algolia.
-- Stripe Payment Element on the confirmation screen for live card capture.
+- Enable Sentry source-map upload (wrap `next.config` with `withSentryConfig`
+  and set `SENTRY_AUTH_TOKEN`) for readable frontend stack traces.
 
 ## Common incidents
 

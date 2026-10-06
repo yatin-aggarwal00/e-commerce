@@ -46,7 +46,11 @@ services:
       # Leave STRIPE_SECRET_KEY empty to use the built-in fake payment provider.
       PAYMENT_PROVIDER: ${PAYMENT_PROVIDER:-stripe}
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      # Local storage by default; images served from the API at /media.
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+      PUBLIC_MEDIA_BASE_URL: http://localhost:8000
       EMAIL_BACKEND: console
       SEED_ON_START: "true"
     ports:

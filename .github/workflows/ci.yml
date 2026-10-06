@@ -3,9 +3,15 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
     branches: [main]
   workflow_dispatch:
+
+# Allow pushing images to GitHub Container Registry from deploy jobs.
+permissions:
+  contents: read
+  packages: write
 
 jobs:
   backend:
@@ -68,18 +74,190 @@ jobs:
       - name: Build
         run: npm run build
 
+  security:
+    name: Security scans
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install scanners
+        run: pip install bandit==1.8.0 pip-audit==2.7.3
+
+      # Hard gate: static analysis of our own backend code.
+      - name: Bandit (backend SAST)
+        working-directory: backend
+        run: bandit -q -r app -x app/seed.py
+
+      # Report-only: third-party CVEs are tracked but don't block the pipeline
+      # (triaged via Dependabot PRs instead).
+      - name: pip-audit (backend deps)
+        working-directory: backend
+        run: pip-audit -r requirements.txt || true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: npm audit (frontend deps)
+        working-directory: frontend
+        run: npm audit --audit-level=high || true
+
+  e2e:
+    name: Frontend — E2E (Playwright)
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and start the full stack
+        run: docker compose up -d --build
+
+      - name: Wait for services
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:8000/api/v1/health >/dev/null \
+               && curl -sf http://localhost:3000 >/dev/null; then
+              echo "stack is up"; exit 0
+            fi
+            sleep 5
+          done
+          echo "services did not come up in time"; docker compose logs --tail=150; exit 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Playwright + browser
+        working-directory: frontend
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install --with-deps chromium
+
+      - name: Run E2E tests
+        working-directory: frontend
+        env:
+          E2E_BASE_URL: http://localhost:3000
+        run: npx playwright test
+
+      - name: Dump stack logs on failure
+        if: failure()
+        run: docker compose logs --tail=200
+
+  lighthouse:
+    name: Frontend — Lighthouse
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and start the full stack
+        run: docker compose up -d --build
+
+      - name: Wait for services
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:8000/api/v1/health >/dev/null \
+               && curl -sf http://localhost:3000 >/dev/null; then
+              echo "stack is up"; exit 0
+            fi
+            sleep 5
+          done
+          echo "services did not come up in time"; docker compose logs --tail=150; exit 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Run Lighthouse CI
+        run: |
+          npm install -g @lhci/cli@0.14.x
+          lhci autorun
+
+      - name: Dump stack logs on failure
+        if: failure()
+        run: docker compose logs --tail=200
+
   deploy-staging:
     name: Deploy to staging
-    needs: [backend, frontend]
+    needs: [backend, frontend, security, e2e, lighthouse]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     environment: staging
     steps:
       - uses: actions/checkout@v4
-      # Wire this to your hosting target (e.g. build & push images to a
-      # registry, then deploy to Render/Fly/ECS/Kubernetes). Secrets live in
-      # the "staging" GitHub Environment, never in the repo.
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & push API image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: true
+          tags: ghcr.io/${{ github.repository }}/api:staging,ghcr.io/${{ github.repository }}/api:${{ github.sha }}
+
+      - name: Build & push web image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          push: true
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL }}
+            NEXT_PUBLIC_SITE_URL=${{ vars.NEXT_PUBLIC_SITE_URL }}
+          tags: ghcr.io/${{ github.repository }}/web:staging,ghcr.io/${{ github.repository }}/web:${{ github.sha }}
+
       - name: Deploy
         run: |
-          echo "Building and deploying commit ${GITHUB_SHA} to staging."
-          echo "Configure your deploy target in this step."
+          echo "Images pushed to GHCR tagged 'staging' and ${GITHUB_SHA}."
+          echo "Wire this step to your host (Render/Fly/ECS/Kubernetes) to roll"
+          echo "out the new images. Migrations run on boot via start.sh."
+
+  deploy-production:
+    name: Deploy to production
+    needs: [backend, frontend, security, e2e, lighthouse]
+    # Promote on a version tag (vX.Y.Z) or a manual dispatch.
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & push API image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: true
+          tags: ghcr.io/${{ github.repository }}/api:latest,ghcr.io/${{ github.repository }}/api:${{ github.ref_name }}
+
+      - name: Build & push web image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          push: true
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL }}
+            NEXT_PUBLIC_SITE_URL=${{ vars.NEXT_PUBLIC_SITE_URL }}
+          tags: ghcr.io/${{ github.repository }}/web:latest,ghcr.io/${{ github.repository }}/web:${{ github.ref_name }}
+
+      - name: Deploy
+        run: |
+          echo "Promoting ${GITHUB_REF_NAME} to production."
+          echo "Wire this step to your production host. Keep the previous image"
+          echo "tag to enable a one-command rollback (see RUNBOOK.md)."
