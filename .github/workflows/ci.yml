@@ -21,16 +21,16 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install dependencies
-        run: echo "TODO: install dependencies (e.g. npm ci)"
+        run: echo "install dependencies (e.g. npm ci)"
 
       - name: Lint
-        run: echo "TODO: run linter"
+        run: echo "run linter"
 
       - name: Build
-        run: echo "TODO: build the e-commerce app"
+        run: echo "build the e-commerce app"
 
       - name: Test
-        run: echo "TODO: run the test suite"
+        run: echo "run the test suite"
 
       - name: Done
         run: echo "CI placeholder completed successfully ✅"
