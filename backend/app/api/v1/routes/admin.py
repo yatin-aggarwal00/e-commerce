@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
@@ -10,7 +10,12 @@ from app.models.category import Category
 from app.models.inventory import Inventory
 from app.models.order import Order, OrderStatus, PaymentStatus
 from app.models.product import Product, ProductImage, ProductVariant
-from app.schemas.admin import AdminStats, InventoryUpdate, VariantInventoryOut
+from app.schemas.admin import (
+    AdminStats,
+    InventoryUpdate,
+    UploadResult,
+    VariantInventoryOut,
+)
 from app.schemas.catalog import (
     CategoryCreate,
     CategoryOut,
@@ -24,6 +29,12 @@ from app.schemas.catalog import (
 from app.schemas.common import Message, Page
 from app.schemas.order import OrderOut, OrderStatusUpdate
 from app.services.email import send_order_status_update
+from app.services.storage import (
+    ALLOWED_CONTENT_TYPES,
+    MAX_UPLOAD_BYTES,
+    StorageError,
+    get_storage,
+)
 
 # Every route here requires an admin (enforced via the router dependency).
 router = APIRouter(
@@ -80,6 +91,39 @@ def stats(db: DbSession, _: CurrentAdmin) -> AdminStats:
         revenue_cents=revenue,
         low_stock=low_stock,
     )
+
+
+# --- Image uploads ------------------------------------------------------
+@router.post("/uploads", response_model=UploadResult, status_code=status.HTTP_201_CREATED)
+async def upload_image(_: CurrentAdmin, file: UploadFile = File(...)) -> UploadResult:
+    """Upload a product image to the configured storage backend (local or S3).
+
+    Returns a public URL to attach to a product via the create/update APIs.
+    """
+    content_type = (file.content_type or "").lower()
+    if content_type not in ALLOWED_CONTENT_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=f"Unsupported image type. Allowed: {sorted(ALLOWED_CONTENT_TYPES)}",
+        )
+    data = await file.read()
+    if not data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file"
+        )
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"File exceeds {MAX_UPLOAD_BYTES // (1024 * 1024)} MB limit",
+        )
+    try:
+        url = get_storage().save(data, content_type, file.filename or "image")
+    except StorageError as err:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Image storage is unavailable",
+        ) from err
+    return UploadResult(url=url)
 
 
 # --- Categories ---------------------------------------------------------

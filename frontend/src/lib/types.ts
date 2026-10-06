@@ -153,6 +153,15 @@ export interface CheckoutResponse {
   provider: string;
 }
 
+export interface PaymentConfig {
+  provider: string;
+  publishable_key: string;
+}
+
+export interface UploadResult {
+  url: string;
+}
+
 export interface TokenPair {
   access_token: string;
   refresh_token: string;

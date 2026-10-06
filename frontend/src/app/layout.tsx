@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 
 import { Footer } from "@/components/Footer";
 import { Navbar } from "@/components/Navbar";
+import { SentryInit } from "@/components/SentryInit";
 import { StoreProvider } from "@/context/StoreProvider";
 
 import "./globals.css";
@@ -31,6 +32,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className={inter.variable}>
       <body className="flex min-h-screen flex-col">
+        <SentryInit />
         <StoreProvider>
           <Navbar />
           <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8">{children}</main>

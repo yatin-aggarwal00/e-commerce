@@ -6,9 +6,11 @@ import type {
   Facets,
   Order,
   Page,
+  PaymentConfig,
   ProductDetail,
   ProductListItem,
   TokenPair,
+  UploadResult,
   User,
 } from "./types";
 
@@ -199,6 +201,16 @@ export const api = {
   login: (email: string, password: string) =>
     request<TokenPair>("/auth/login", { method: "POST", body: { email, password } }),
   me: () => request<User>("/auth/me", { auth: true }),
+  requestPasswordReset: (email: string) =>
+    request<{ detail: string }>("/auth/password-reset/request", {
+      method: "POST",
+      body: { email },
+    }),
+  confirmPasswordReset: (token: string, new_password: string) =>
+    request<{ detail: string }>("/auth/password-reset/confirm", {
+      method: "POST",
+      body: { token, new_password },
+    }),
 
   // Checkout + orders.
   checkout: (body: {
@@ -211,6 +223,8 @@ export const api = {
   listOrders: () => request<Order[]>("/orders", { auth: true }),
   getOrder: (orderNumber: string, email?: string) =>
     request<Order>(`/orders/${orderNumber}${qs({ email })}`, { auth: true }),
+  // Public payment config: provider + publishable key for the Payment Element.
+  paymentConfig: () => request<PaymentConfig>("/payments/config"),
   // Dev-only: confirm a sandbox payment (fake provider). No-op in production.
   devConfirmPayment: (orderNumber: string) =>
     request<{ status: string }>(`/payments/dev/confirm/${orderNumber}`, { method: "POST" }),
@@ -230,6 +244,28 @@ export const api = {
     request<Category>("/admin/categories", { method: "POST", body, auth: true }),
   adminCreateProduct: (body: unknown) =>
     request<ProductDetail>("/admin/products", { method: "POST", body, auth: true }),
+  // Multipart upload (FormData) — bypasses the JSON request() helper.
+  adminUploadImage: async (file: File): Promise<UploadResult> => {
+    const fd = new FormData();
+    fd.append("file", file);
+    const headers: Record<string, string> = {};
+    if (tokenStore.access) headers["Authorization"] = `Bearer ${tokenStore.access}`;
+    const res = await fetch(`${base()}/admin/uploads`, {
+      method: "POST",
+      headers,
+      body: fd,
+    });
+    if (!res.ok) {
+      let detail = res.statusText;
+      try {
+        detail = (await res.json()).detail ?? detail;
+      } catch {
+        /* non-JSON error body */
+      }
+      throw new ApiError(res.status, typeof detail === "string" ? detail : "Upload failed");
+    }
+    return (await res.json()) as UploadResult;
+  },
   adminDeactivateProduct: (id: string) =>
     request<{ detail: string }>(`/admin/products/${id}`, { method: "DELETE", auth: true }),
   adminSetInventory: (variantId: string, quantity: number) =>

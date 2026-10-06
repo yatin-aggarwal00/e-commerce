@@ -73,10 +73,27 @@ export default function CheckoutPage() {
         },
       });
       await refreshCart(); // cart was emptied server-side on order creation
-      router.push(
+
+      const confirmationUrl =
         `/checkout/confirmation?order=${res.order.order_number}` +
-          `&email=${encodeURIComponent(form.email)}&provider=${res.provider}`,
-      );
+        `&email=${encodeURIComponent(form.email)}&provider=${res.provider}`;
+
+      if (res.provider === "stripe") {
+        // Hand the client secret to the Payment Element step via sessionStorage
+        // (kept out of the URL). Stripe collects the card, then redirects to the
+        // confirmation page; the backend webhook marks the order paid.
+        sessionStorage.setItem(
+          "ec_pending_payment",
+          JSON.stringify({
+            orderNumber: res.order.order_number,
+            clientSecret: res.payment_client_secret,
+            email: form.email,
+          }),
+        );
+        router.push("/checkout/payment");
+      } else {
+        router.push(confirmationUrl);
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Checkout failed. Please try again.");
       setSubmitting(false);

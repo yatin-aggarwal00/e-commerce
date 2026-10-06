@@ -10,9 +10,10 @@ import jwt
 
 from app.core.config import settings
 
-ACCESS_TOKEN = "access"
-REFRESH_TOKEN = "refresh"
-RESET_TOKEN = "reset"
+# JWT "type" claim discriminators (not secrets).
+ACCESS_TOKEN = "access"  # nosec B105
+REFRESH_TOKEN = "refresh"  # nosec B105
+RESET_TOKEN = "reset"  # nosec B105
 
 # bcrypt hashes at most the first 72 bytes of the input, and modern bcrypt
 # raises on longer input instead of truncating, so we truncate explicitly.

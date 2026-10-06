@@ -23,3 +23,9 @@ class AdminStats(BaseModel):
     paid_orders: int
     revenue_cents: int
     low_stock: int
+
+
+class UploadResult(BaseModel):
+    """Public URL of a stored product image, ready to attach to a product."""
+
+    url: str
