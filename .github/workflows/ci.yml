@@ -1,0 +1,36 @@
+name: CI
+
+# Temporary placeholder CI for the e-commerce repo.
+# Replace the echo steps with real install/lint/build/test commands
+# once the project stack is in place.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build & Test (placeholder)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: echo "TODO: install dependencies (e.g. npm ci)"
+
+      - name: Lint
+        run: echo "TODO: run linter"
+
+      - name: Build
+        run: echo "TODO: build the e-commerce app"
+
+      - name: Test
+        run: echo "TODO: run the test suite"
+
+      - name: Done
+        run: echo "CI placeholder completed successfully ✅"
