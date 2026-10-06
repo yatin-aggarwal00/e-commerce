@@ -1,0 +1,64 @@
+"""FastAPI application factory and entrypoint."""
+from __future__ import annotations
+
+import logging
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from app import __version__
+from app.api.v1.router import api_router
+from app.core.config import settings
+from app.middleware import RateLimitMiddleware
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("app")
+
+
+def create_app() -> FastAPI:
+    # Optional error tracking.
+    if settings.SENTRY_DSN:
+        try:  # pragma: no cover - only runs when configured
+            import sentry_sdk
+
+            sentry_sdk.init(dsn=settings.SENTRY_DSN, environment=settings.ENVIRONMENT)
+            logger.info("Sentry initialised")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Sentry init failed: %s", exc)
+
+    app = FastAPI(
+        title=settings.PROJECT_NAME,
+        version=__version__,
+        description=(
+            "REST API for the Household Furniture storefront (V1). "
+            "Interactive docs at /docs, OpenAPI schema at /openapi.json."
+        ),
+        openapi_url=f"{settings.API_V1_PREFIX}/openapi.json",
+        docs_url="/docs",
+        redoc_url="/redoc",
+    )
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    app.add_middleware(RateLimitMiddleware)
+
+    app.include_router(api_router, prefix=settings.API_V1_PREFIX)
+
+    @app.get("/", tags=["health"])
+    def root() -> dict:
+        return {
+            "name": settings.PROJECT_NAME,
+            "version": __version__,
+            "docs": "/docs",
+            "api": settings.API_V1_PREFIX,
+        }
+
+    return app
+
+
+app = create_app()

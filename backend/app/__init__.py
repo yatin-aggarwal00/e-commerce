@@ -1,0 +1,3 @@
+"""Household Furniture E-commerce API (V1)."""
+
+__version__ = "1.0.0"
