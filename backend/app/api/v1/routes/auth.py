@@ -100,6 +100,8 @@ def me(user: CurrentUser) -> User:
 def update_me(payload: UserUpdate, user: CurrentUser, db: DbSession) -> User:
     if payload.full_name is not None:
         user.full_name = payload.full_name
+    if payload.phone_number is not None:
+        user.phone_number payload.phone_number
     db.commit()
     db.refresh(user)
     return user

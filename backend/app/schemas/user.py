@@ -11,6 +11,7 @@ class UserOut(BaseModel):
     id: str
     email: EmailStr
     full_name: str
+    phone_number: str | None = None
     is_active: bool
     is_admin: bool
     created_at: datetime
@@ -18,3 +19,4 @@ class UserOut(BaseModel):
 
 class UserUpdate(BaseModel):
     full_name: str | None = Field(default=None, max_length=255)
+    phone_number: str | None = Field(default=None, max_length=32
