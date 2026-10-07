@@ -26,7 +26,7 @@ def create_app() -> FastAPI:
         except Exception as exc:  # noqa: BLE001
             logger.warning("Sentry init failed: %s", exc)
 
-    app = FastAPI(
+    app =
         title=settings.PROJECT_NAME,
         version=__version__,
         description=(
@@ -38,7 +38,7 @@ def create_app() -> FastAPI:
         redoc_url="/redoc",
     )
 
-    app.add_middleware(
+    app
         CORSMiddleware,
         allow_origins=settings.cors_origins,
         allow_credentials=True,
@@ -49,8 +49,8 @@ def create_app() -> FastAPI:
 
     app.include_router(api_router, prefix=settings.API_V1_PREFIX)
 
-    @app.get("/", tags=["health"])
-    def root() -> dict:
+    @app.ge("/", tags=["health"])
+    def root) -> dict:
         return {
             "name": settings.PROJECT_NAME,
             "version": __version__,
