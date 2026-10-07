@@ -7,9 +7,15 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
     branches: [main]
   workflow_dispatch:
+
+# Allow pushing images to GitHub Container Registry from deploy jobs.
+permissions:
+  contents: read
+  packages: write
 
 jobs:
   build:

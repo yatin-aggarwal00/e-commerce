@@ -186,6 +186,7 @@ function CreateProduct({
 }) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
   const [newCategory, setNewCategory] = useState("");
   const [f, setF] = useState({
     name: "",
@@ -206,6 +207,19 @@ function CreateProduct({
     await api.adminCreateCategory({ name: newCategory.trim(), slug });
     setNewCategory("");
     await onCategories();
+  }
+
+  async function uploadImage(file: File) {
+    setUploading(true);
+    setError(null);
+    try {
+      const { url } = await api.adminUploadImage(file);
+      setF((prev) => ({ ...prev, image: url }));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Image upload failed");
+    } finally {
+      setUploading(false);
+    }
   }
 
   async function submit(e: React.FormEvent) {
@@ -272,7 +286,24 @@ function CreateProduct({
           ))}
         </select>
       </L>
-      <L label="Image URL"><input className="input" value={f.image} onChange={(e) => setF({ ...f, image: e.target.value })} /></L>
+      <L label="Image" className="col-span-2">
+        <input className="input" placeholder="https://… or upload a file" value={f.image} onChange={(e) => setF({ ...f, image: e.target.value })} />
+        <div className="mt-2 flex items-center gap-3">
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/avif,image/gif"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) uploadImage(file);
+            }}
+            className="text-xs"
+          />
+          {uploading && <span className="text-xs text-brand-500">Uploading…</span>}
+          {!uploading && f.image && (
+            <span className="text-xs text-emerald-700">Image ready</span>
+          )}
+        </div>
+      </L>
       <L label="Room type"><input className="input" value={f.room_type} onChange={(e) => setF({ ...f, room_type: e.target.value })} /></L>
       <L label="Material"><input className="input" value={f.material} onChange={(e) => setF({ ...f, material: e.target.value })} /></L>
       <L label="SKU"><input className="input" value={f.sku} required onChange={(e) => setF({ ...f, sku: e.target.value })} /></L>

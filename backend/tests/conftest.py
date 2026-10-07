@@ -14,6 +14,9 @@ os.environ.setdefault("PAYMENT_PROVIDER", "fake")
 os.environ.setdefault("STRIPE_SECRET_KEY", "")
 os.environ.setdefault("STRIPE_WEBHOOK_SECRET", "test-secret")
 os.environ.setdefault("SECRET_KEY", "test-secret-key-for-tests-only")
+# Don't spin up the in-process APScheduler during tests; the expiry job is
+# exercised directly and via the on-demand admin endpoint instead.
+os.environ.setdefault("SCHEDULER_ENABLED", "false")
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

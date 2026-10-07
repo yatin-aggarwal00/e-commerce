@@ -2,20 +2,37 @@
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app import __version__
 from app.api.v1.router import api_router
 from app.core.config import settings
 from app.middleware import RateLimitMiddleware
+from app.scheduler import shutdown_scheduler, start_scheduler
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("app")
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Start/stop background jobs (the pending-order expiry scheduler)."""
+    start_scheduler()
+    try:
+        yield
+    finally:
+        shutdown_scheduler()
+
+
 def create_app() -> FastAPI:
+    # Refuse to boot with insecure/incomplete production configuration.
+    settings.validate_runtime()
+
     # Optional error tracking.
     if settings.SENTRY_DSN:
         try:  # pragma: no cover - only runs when configured
@@ -36,6 +53,7 @@ def create_app() -> FastAPI:
         openapi_url=f"{settings.API_V1_PREFIX}/openapi.json",
         docs_url="/docs",
         redoc_url="/redoc",
+        lifespan=lifespan,
     )
 
     app.add_middleware(
@@ -46,6 +64,17 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     app.add_middleware(RateLimitMiddleware)
+
+    # Serve locally-stored product images when using the "local" storage
+    # backend. In production (STORAGE_BACKEND=s3) images are served by S3/CDN.
+    if settings.STORAGE_BACKEND.lower() == "local":
+        media_root = Path(settings.MEDIA_ROOT)
+        media_root.mkdir(parents=True, exist_ok=True)
+        app.mount(
+            settings.MEDIA_URL_PREFIX,
+            StaticFiles(directory=str(media_root)),
+            name="media",
+        )
 
     app.include_router(api_router, prefix=settings.API_V1_PREFIX)
 

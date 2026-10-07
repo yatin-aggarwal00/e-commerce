@@ -23,3 +23,17 @@ class AdminStats(BaseModel):
     paid_orders: int
     revenue_cents: int
     low_stock: int
+
+
+class UploadResult(BaseModel):
+    """Public URL of a stored product image, ready to attach to a product."""
+
+    url: str
+
+
+class ExpirePendingResult(BaseModel):
+    """Outcome of an on-demand pending-order expiry run."""
+
+    expired_orders: int
+    released_units: int
+    order_numbers: list[str]
