@@ -33,6 +33,14 @@ Required in staging/prod:
   `S3_ENDPOINT_URL` is only needed for non-AWS stores (MinIO/R2/Spaces).
 - `EMAIL_BACKEND=smtp` + SMTP credentials (or swap `services/email.py` for SES/SendGrid)
 - `SENTRY_DSN` (API) and `NEXT_PUBLIC_SENTRY_DSN` (storefront) — enable error tracking
+- `ORDER_PENDING_TTL_MINUTES` (default `60`) — how long an unpaid pending order
+  may hold its stock reservation before the expiry job cancels it. Tune to your
+  payment-window SLA; too low cancels slow-but-legitimate checkouts, too high
+  leaks sellable stock.
+- `ORDER_EXPIRY_INTERVAL_MINUTES` (default `5`) — how often the in-process
+  scheduler runs the sweep.
+- `SCHEDULER_ENABLED` (default `true`) — set `false` only if a dedicated worker
+  owns the schedule; the on-demand admin trigger works regardless.
 - `ENVIRONMENT=production` — disables the dev-only payment confirm endpoint and
   activates the startup config check (`Settings.validate_runtime`), which refuses
   to boot on a weak `SECRET_KEY`, `DEBUG=true`, missing Stripe/S3 config, or empty CORS.
@@ -98,6 +106,38 @@ rolling back app code that depends on the new schema.
 - Locally, test with the Stripe CLI: `stripe listen --forward-to
   localhost:8000/api/v1/payments/webhook`.
 
+## Pending-order expiry (abandoned-checkout sweep)
+
+At checkout the API creates a **pending** order and **reserves** stock. A paid
+webhook sells that stock; a failed webhook releases it. A customer who simply
+abandons the checkout (never pays, never fails) would otherwise hold the
+reservation forever, leaking sellable inventory. A scheduled job closes that gap.
+
+- **What it does:** cancels pending orders older than `ORDER_PENDING_TTL_MINUTES`
+  and releases their reservation, reusing the exact release path as the
+  failed-payment branch (`app/services/orders.py::release_order_reservation`).
+  Expired orders become `cancelled` (payment `failed`).
+- **Safety:** each order is expired in its own transaction with an in-lock status
+  re-check, so the job is idempotent and safe to run repeatedly or concurrently —
+  it never double-releases stock and never touches an order that reached `paid`.
+- **Scheduling:** runs in-process via APScheduler every
+  `ORDER_EXPIRY_INTERVAL_MINUTES`. For multi-instance deployments each tick takes
+  a best-effort Redis lock so only one instance does the work; correctness does
+  not depend on the lock (the DB transaction is the guarantee), so a Redis outage
+  degrades to "every instance may run" rather than to incorrect stock.
+  > **Design note / trade-off:** we chose lightweight in-process APScheduler +
+  > Redis lock over a dedicated worker (Celery/RQ beat on the existing Redis).
+  > Given V1's single-service footprint this is sufficient and operationally
+  > simpler; revisit a dedicated beat worker if/when background work grows. This
+  > aligns with the "move the rate-limit counter to Redis" follow-up — same
+  > shared store.
+- **On demand:** `POST /api/v1/admin/orders/expire-pending` (admin auth) runs the
+  identical sweep immediately — useful for ops and testing. Returns the count of
+  orders expired and units released.
+- **Observability:** each run emits a structured log line (`app.orders` logger)
+  with the expired-order and released-unit counts; per-order failures are logged
+  and reported to Sentry without aborting the batch.
+
 ## Product images / object storage
 
 - Admins upload images via `POST /api/v1/admin/uploads`; the response URL is
@@ -126,7 +166,6 @@ rolling back app code that depends on the new schema.
 
 ## Known follow-ups (post-V1)
 
-- Scheduled job to expire abandoned pending orders and release reserved stock.
 - Move rate-limit counters to Redis for correct multi-instance limiting.
 - Upgrade search from ILIKE to Postgres full-text search or Algolia.
 - Enable Sentry source-map upload (wrap `next.config` with `withSentryConfig`
@@ -136,7 +175,8 @@ rolling back app code that depends on the new schema.
 
 | Symptom                        | First checks                                              |
 |--------------------------------|-----------------------------------------------------------|
-| Orders stuck `pending`         | Webhook delivery in Stripe dashboard; `STRIPE_WEBHOOK_SECRET`; `/payments/webhook` logs |
+| Orders stuck `pending`         | Webhook delivery in Stripe dashboard; `STRIPE_WEBHOOK_SECRET`; `/payments/webhook` logs. Past the TTL they should auto-cancel — check the `app.orders` expiry logs and `SCHEDULER_ENABLED` |
+| Reservations not releasing     | Confirm the expiry scheduler is running (`app.scheduler` startup log) or trigger `POST /admin/orders/expire-pending`; check `ORDER_PENDING_TTL_MINUTES` |
 | 401s after a while             | Token expiry/refresh flow; `SECRET_KEY` consistent across instances |
 | CORS errors in browser         | `BACKEND_CORS_ORIGINS` matches the storefront origin exactly |
 | `/health/db` failing           | Postgres reachable; connection limits; migrations applied |

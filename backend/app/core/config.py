@@ -46,6 +46,17 @@ class Settings(BaseSettings):
     # --- Rate limiting ---------------------------------------------------
     RATE_LIMIT_PER_MINUTE: int = 120
 
+    # --- Orders / inventory integrity ------------------------------------
+    # Pending orders left unpaid longer than this are cancelled by a scheduled
+    # job, which releases the stock they reserved at checkout. See
+    # ``app/services/orders.py`` and ``app/scheduler.py``.
+    ORDER_PENDING_TTL_MINUTES: int = 60
+    # How often the expiry job runs (in-process APScheduler interval).
+    ORDER_EXPIRY_INTERVAL_MINUTES: int = 5
+    # Set false to run without the in-process scheduler (e.g. tests, or when a
+    # dedicated worker owns the schedule). The on-demand trigger still works.
+    SCHEDULER_ENABLED: bool = True
+
     # --- Payments (Stripe sandbox by default) ----------------------------
     PAYMENT_PROVIDER: str = "stripe"  # "stripe" | "fake"
     STRIPE_SECRET_KEY: str = ""

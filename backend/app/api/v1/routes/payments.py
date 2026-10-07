@@ -11,6 +11,7 @@ from app.models.order import Order, OrderStatus, PaymentStatus
 from app.models.payment import Payment
 from app.models.product import ProductVariant
 from app.services.email import send_order_confirmation
+from app.services.orders import release_order_reservation
 from app.services.payment import PaymentError, get_payment_provider
 
 router = APIRouter(prefix="/payments", tags=["payments"])
@@ -41,17 +42,6 @@ def _finalize_paid(db: DbSession, order: Order) -> None:
             variant.inventory.quantity = max(
                 variant.inventory.quantity - item.quantity, 0
             )
-            variant.inventory.reserved = max(
-                variant.inventory.reserved - item.quantity, 0
-            )
-
-
-def _release_reservation(db: DbSession, order: Order) -> None:
-    for item in order.items:
-        if not item.variant_id:
-            continue
-        variant = db.get(ProductVariant, item.variant_id)
-        if variant and variant.inventory:
             variant.inventory.reserved = max(
                 variant.inventory.reserved - item.quantity, 0
             )
@@ -111,7 +101,7 @@ async def payment_webhook(
         payment.raw = json.dumps(event.raw, default=str)[:8000]
         order.payment_status = PaymentStatus.FAILED.value
         order.status = OrderStatus.FAILED.value
-        _release_reservation(db, order)
+        release_order_reservation(db, order)
         db.commit()
         return {"received": True, "handled": True}
 

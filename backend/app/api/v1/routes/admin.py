@@ -12,6 +12,7 @@ from app.models.order import Order, OrderStatus, PaymentStatus
 from app.models.product import Product, ProductImage, ProductVariant
 from app.schemas.admin import (
     AdminStats,
+    ExpirePendingResult,
     InventoryUpdate,
     UploadResult,
     VariantInventoryOut,
@@ -29,6 +30,7 @@ from app.schemas.catalog import (
 from app.schemas.common import Message, Page
 from app.schemas.order import OrderOut, OrderStatusUpdate
 from app.services.email import send_order_status_update
+from app.services.orders import expire_pending_orders
 from app.services.storage import (
     ALLOWED_CONTENT_TYPES,
     MAX_UPLOAD_BYTES,
@@ -313,6 +315,22 @@ def set_inventory(
 
 
 # --- Orders -------------------------------------------------------------
+@router.post("/orders/expire-pending", response_model=ExpirePendingResult)
+def expire_pending(db: DbSession, _: CurrentAdmin) -> ExpirePendingResult:
+    """Run the pending-order expiry job on demand (ops / testing).
+
+    Cancels pending orders older than ``ORDER_PENDING_TTL_MINUTES`` and releases
+    their reserved stock. Identical to the scheduled run, and safe to invoke
+    repeatedly: already-expired or paid orders are left untouched.
+    """
+    result = expire_pending_orders(db)
+    return ExpirePendingResult(
+        expired_orders=result.expired_orders,
+        released_units=result.released_units,
+        order_numbers=result.order_numbers,
+    )
+
+
 @router.get("/orders", response_model=Page[OrderOut])
 def admin_list_orders(
     db: DbSession,

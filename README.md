@@ -142,7 +142,7 @@ filter/sort/search, cart stock rules, the full checkout → webhook → paid flo
 | Checkout  | `POST /checkout`, `GET /orders`, `GET /orders/{number}`                   |
 | Auth      | `POST /auth/password-reset/request`, `/auth/password-reset/confirm`       |
 | Payments  | `GET /payments/config` (provider + publishable key), `POST /payments/webhook` (idempotent, source of truth for paid state) |
-| Admin     | `/admin/products`, `/admin/variants/{id}/inventory`, `/admin/orders`, `/admin/stats`, `POST /admin/uploads` (image upload) |
+| Admin     | `/admin/products`, `/admin/variants/{id}/inventory`, `/admin/orders`, `POST /admin/orders/expire-pending` (sweep abandoned orders), `/admin/stats`, `POST /admin/uploads` (image upload) |
 
 Full, always-current docs are generated at `/docs`.
 
@@ -156,8 +156,13 @@ Full, always-current docs are generated at `/docs`.
   replayed events never double-apply or double-decrement stock.
 - A **failed** payment releases the reservation and never flips the order to a
   paid state.
-- Abandoned pending orders keep their reservation; expiring them is a scheduled
-  job (noted as a follow-up in the runbook).
+- **Abandoned** pending orders are swept by a scheduled job: once a pending
+  order is older than `ORDER_PENDING_TTL_MINUTES` (default 60) it is cancelled
+  and its reservation released, reusing the same release path as failed
+  payments. The job is idempotent and race-safe (per-order transaction with an
+  in-lock status re-check), runs in-process via APScheduler (single-flighted
+  across instances by a Redis lock), and can be triggered on demand via
+  `POST /admin/orders/expire-pending`. See the [runbook](./RUNBOOK.md).
 
 ## Status vs. the epic
 
@@ -188,8 +193,6 @@ Full, always-current docs are generated at `/docs`.
   accessibility budgets (≥0.90) are hard gates. See `.lighthouserc.json`.
 - The `deploy-*` jobs push images to GHCR; wire the final rollout step to your
   host (see the runbook).
-- Abandoned pending orders keep their reservation; expiring them is a scheduled
-  job (runbook follow-up).
 
 ## Deployment
 
