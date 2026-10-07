@@ -13,6 +13,7 @@ export default function ProfilePage() {
       <dl className="card space-y-3 p-6 text-sm">
         <Row label="Name" value={user.full_name || "—"} />
         <Row label="Email" value={user.email} />
+        <Row label="Phone" value={user.phone_number || "—"} />
         <Row label="Member since" value={formatDate(user.created_at)} />
         <Row label="Role" value={user.is_admin ? "Administrator" : "Customer"} />
       </dl>
