@@ -2,7 +2,7 @@ import type { MetadataRoute } from "next";
 
 import { api } from "@/lib/api";
 
-const SITE = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
+const SITE = process.env.NEXT_PUBLIC_SITE_URL ?? "http
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const staticRoutes: MetadataRoute.Sitemap = [
